@@ -1,10 +1,44 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import axios from "axios";
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = reader.result.split(",")[1];
+      resolve(base64 || reader.result);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function transformToItems(rawItems) {
+  if (!Array.isArray(rawItems)) return { foodItems: [], drinkItems: [] };
+  const drinkKeywords = ["beer", "wine", "cola", "soda", "juice", "water", "coffee", "tea"];
+  const foodItems = [];
+  const drinkItems = [];
+
+  for (const item of rawItems) {
+    const name = item.item_name || item.name || item.itemName || "";
+    const price = parseFloat(item.item_price ?? item.price ?? item.itemPrice ?? 0) || 0;
+    const quantity = parseInt(item.quantity ?? 1, 10) || 1;
+    const normalized = { name, price, quantity };
+    const lower = name.toLowerCase();
+    const isDrink = drinkKeywords.some((kw) => lower.includes(kw));
+    if (isDrink) drinkItems.push(normalized);
+    else foodItems.push(normalized);
+  }
+
+  return { foodItems, drinkItems };
+}
 
 const Split = () => {
   const navigate = useNavigate();
   const [file, setFile] = useState(null);
   const [error, setError] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
 
   const handleFileChange = (e) => {
     const f = e.target.files?.[0];
@@ -13,21 +47,32 @@ const Split = () => {
     setError("");
   };
 
-  const handleSplit = () => {
+  const handleSplit = async () => {
     if (!file) {
       setError("Please upload a bill image first.");
       return;
     }
     setError("");
-    // Sample data for People page (no OCR - replace with your extraction logic later)
-    const items = {
-      foodItems: [
-        { name: "Burger", quantity: 1, price: 12.99 },
-        { name: "Pizza", quantity: 1, price: 15.0 },
-      ],
-      drinkItems: [{ name: "Cola", quantity: 2, price: 3.0 }],
-    };
-    navigate("/people", { state: { items } });
+    setIsLoading(true);
+  
+    try {
+      const base64 = await fileToBase64(file);
+      const mimeType = file.type || "image/jpeg";
+  
+      const { data } = await axios.post("http://localhost:3000/ExtractData", {
+        imageBase64: base64,
+        mimeType,
+      });
+  
+      const items = transformToItems(data);
+      navigate("/people", { state: { items } });
+    } catch (err) {
+      setError(
+        err.response?.data?.error || err.message || "Failed to extract items. Try again."
+      );
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -42,12 +87,12 @@ const Split = () => {
             SnapWise
           </div>
           <button
-  type="button"
-  onClick={() => navigate("/")}
-  className="rounded-full bg-red-500 px-5 py-2 text-sm font-medium text-white shadow-sm transition-all duration-200 hover:bg-red-600 hover:shadow-md active:scale-95"
->
-  Logout
-</button>
+            type="button"
+            onClick={() => navigate("/")}
+            className="rounded-full bg-red-500 px-5 py-2 text-sm font-medium text-white shadow-sm transition-all duration-200 hover:bg-red-600 hover:shadow-md active:scale-95"
+          >
+            Logout
+          </button>
         </nav>
       </header>
 
@@ -84,10 +129,10 @@ const Split = () => {
           <button
             type="button"
             onClick={handleSplit}
-            disabled={!file}
+            disabled={!file || isLoading}
             className="inline-flex items-center justify-center rounded-lg bg-blue-600 px-6 py-2 text-sm font-semibold text-white shadow-sm disabled:opacity-60 disabled:cursor-not-allowed hover:bg-blue-700"
           >
-            Split
+            {isLoading ? "Extracting..." : "Split"}
           </button>
         </div>
 
